@@ -651,14 +651,17 @@ function getSharedCtx(){
 async function ttsSpeak(text, rate){
   if(openaiKey){
     try{
-      // Init/unlock AudioContext first (must happen close to user gesture or be already unlocked)
       const ctx=getSharedCtx();
       const r=await fetch("https://api.openai.com/v1/audio/speech",{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey},
         body:JSON.stringify({model:"tts-1-hd",voice:ttsVoice,input:applySanskrit(text),speed:ttsSpeed,response_format:"mp3"})
       });
-      if(!r.ok)throw new Error("OpenAI "+r.status);
+      if(!r.ok){
+        const errText=await r.text();
+        showTtsError("OpenAI "+r.status+": "+errText.slice(0,80));
+        throw new Error("OpenAI "+r.status);
+      }
       const arrayBuf=await r.arrayBuffer();
       const decoded=await ctx.decodeAudioData(arrayBuf);
       await new Promise((res,rej)=>{
@@ -670,7 +673,10 @@ async function ttsSpeak(text, rate){
         src.start(0);
       });
       return;
-    }catch(e){console.warn("OpenAI TTS fallback:",e.message);}
+    }catch(e){
+      showTtsError("OpenAI error: "+e.message.slice(0,80));
+      console.warn("OpenAI TTS fallback:",e.message);
+    }
   }
   // Browser speech fallback
   await new Promise(res=>{
@@ -678,6 +684,17 @@ async function ttsSpeak(text, rate){
     u.voice=voiceObj;u.rate=rate||getMedRate();u.pitch=0.91;u.volume=1.0;
     u.onend=u.onerror=res;speechSynthesis.speak(u);
   });
+}
+
+function showTtsError(msg){
+  let el=document.getElementById("tts-error");
+  if(!el){
+    el=document.createElement("div");el.id="tts-error";
+    el.style.cssText="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#7a1818;color:#fff;padding:10px 18px;border-radius:10px;font-size:12px;font-family:Palatino,serif;z-index:9999;max-width:90%;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.3)";
+    document.body.appendChild(el);
+  }
+  el.textContent=msg;el.style.display="block";
+  clearTimeout(el._t);el._t=setTimeout(()=>{el.style.display="none";},8000);
 }
 
 // Call this on any user gesture to pre-unlock audio
