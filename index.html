@@ -638,33 +638,50 @@ function splitChunks(text,max){
   for(const s of sents){if((cur+s).length>max&&cur){chunks.push(cur.trim());cur=s;}else cur+=s;}
   if(cur.trim())chunks.push(cur.trim());return chunks;
 }
+// Shared AudioContext — created on first user gesture, stays unlocked
+let sharedAudioCtx=null;
+function getSharedCtx(){
+  if(!sharedAudioCtx||sharedAudioCtx.state==="closed"){
+    sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  }
+  if(sharedAudioCtx.state==="suspended")sharedAudioCtx.resume();
+  return sharedAudioCtx;
+}
+
 async function ttsSpeak(text, rate){
   if(openaiKey){
     try{
+      // Init/unlock AudioContext first (must happen close to user gesture or be already unlocked)
+      const ctx=getSharedCtx();
       const r=await fetch("https://api.openai.com/v1/audio/speech",{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey},
         body:JSON.stringify({model:"tts-1-hd",voice:ttsVoice,input:applySanskrit(text),speed:ttsSpeed,response_format:"mp3"})
       });
       if(!r.ok)throw new Error("OpenAI "+r.status);
-      const blob=await r.blob();
-      const url=URL.createObjectURL(blob);
+      const arrayBuf=await r.arrayBuffer();
+      const decoded=await ctx.decodeAudioData(arrayBuf);
       await new Promise((res,rej)=>{
-        const a=new Audio(url);
-        a.onended=()=>{URL.revokeObjectURL(url);res();};
-        a.onerror=(e)=>{URL.revokeObjectURL(url);rej(e);};
-        a.play().catch(rej);
+        const src=ctx.createBufferSource();
+        src.buffer=decoded;
+        src.connect(ctx.destination);
+        src.onended=res;
+        src.onerror=rej;
+        src.start(0);
       });
       return;
-    }catch(e){console.warn("OpenAI TTS, using browser fallback:",e.message);}
+    }catch(e){console.warn("OpenAI TTS fallback:",e.message);}
   }
-  // Browser fallback
+  // Browser speech fallback
   await new Promise(res=>{
     const u=new SpeechSynthesisUtterance(applySanskrit(text));
     u.voice=voiceObj;u.rate=rate||getMedRate();u.pitch=0.91;u.volume=1.0;
     u.onend=u.onerror=res;speechSynthesis.speak(u);
   });
 }
+
+// Call this on any user gesture to pre-unlock audio
+function unlockAudio(){getSharedCtx();}
 
 function parseSegs(text){
   return text.split(/(\.*\.+)/g).filter(Boolean).map(p=>{
@@ -718,6 +735,7 @@ async function runMeditation(segs){
   if(!ttsAborted){isSpeaking=false;setSpeaking(false);stopBreath();stopCountdown();stopDrone();}
 }
 async function speakMsg(idx){
+  unlockAudio(); // unlock AudioContext synchronously on user click
   const msg=messages[idx];if(!msg||msg.role!=="assistant")return;
   const btn=document.getElementById("speak-"+idx);
   if(currentSpeakId===idx){
@@ -736,6 +754,7 @@ async function speakMsg(idx){
   if(!ttsAborted){currentSpeakId=null;if(btn){btn.textContent="🔊 Listen";btn.classList.remove("speaking");}}
 }
 function beginSpeech(){
+  unlockAudio(); // unlock AudioContext synchronously on user click
   if(!medText)return;
   stopSpeech();const segs=parseSegs(medText);
   isSpeaking=true;isPaused=false;ttsAborted=false;
