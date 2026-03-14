@@ -335,20 +335,19 @@ function medSystem(lv,tr,mins){
   return "You are Darśana giving oral guided meditation spoken aloud.\nFORMAT (strict):\n- Flowing spoken prose ONLY. No markdown, bullets, headers, asterisks.\n- \"...\" = 2-second pause. Use generously.\n- \"......\" = 5-second silence. Use after deep invitations.\n- Short rhythmic sentences.\n- "+tLen+"\n- Open with settling. One core practice. Close gently.\nVOICE: Intimate. Warm. Kind. Assertive about the path.\n"+MED[lv]+"\n"+tNote+"\nBegin now.";
 }
 
+
 // State
 let mode="inquiry",chatTrad="all",medTrad="all",medLevel="moderate",timerMins=0;
 let messages=[],medText="",isSpeaking=false,isPaused=false,voiceObj=null;
-let breathTimer=null,countdownTimer=null,countdownSecs=0;
-let currentSpeakId=null,ttsAborted=false;
+let breathTimer=null,countdownTimer=null,countdownSecs=0,ttsAborted=false,currentSpeakId=null;
 let apiKey=localStorage.getItem("darsana_api_key")||"";
 let openaiKey=localStorage.getItem("darsana_oai_key")||"";
 let ttsVoice=localStorage.getItem("darsana_voice")||"nova";
 let ttsSpeed=parseFloat(localStorage.getItem("darsana_speed")||"0.88");
 
-// Browser voice fallback
 function loadVoices(){
   const v=speechSynthesis.getVoices();if(!v.length)return;
-  const names=["Google UK English Female","Microsoft Hazel","Samantha","Karen","Moira","Tessa"];
+  const names=["Google UK English Female","Samantha","Karen","Moira","Tessa","Microsoft Hazel"];
   for(const n of names){const f=v.find(x=>x.name.includes(n));if(f){voiceObj=f;return;}}
   voiceObj=v.find(x=>x.lang.startsWith("en-GB"))||v.find(x=>x.lang.startsWith("en"))||v[0];
 }
@@ -358,8 +357,9 @@ speechSynthesis.addEventListener("voiceschanged",loadVoices);
 function getTM(id){return TRADITIONS.find(t=>t.id===id)||TRADITIONS[0];}
 function getLM(id){return LEVELS.find(l=>l.id===id)||LEVELS[1];}
 function getHeaders(){return{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"};}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-// Anthropic key
+// Keys
 function checkKey(){
   if(!apiKey){document.getElementById("key-input").focus();
     const s=document.getElementById("key-status");s.textContent="⚠ add key first";s.style.color="#c06040";return false;}
@@ -371,8 +371,7 @@ function initKeyBanner(){
   else{s.textContent="no key";s.style.color="#c06040";}
 }
 function saveKey(){
-  const val=document.getElementById("key-input").value.trim();
-  const s=document.getElementById("key-status");
+  const val=document.getElementById("key-input").value.trim();const s=document.getElementById("key-status");
   if(!val){s.textContent="⚠ empty";s.style.color="#c06040";return;}
   apiKey=val;localStorage.setItem("darsana_api_key",val);
   s.textContent="testing…";s.style.color="#a09050";document.getElementById("key-input").blur();testKey();
@@ -385,42 +384,29 @@ async function testKey(){
     const d=await r.json();
     if(d.error){s.textContent="⚠ "+d.error.message.slice(0,28);s.style.color="#c06040";}
     else{s.textContent="✓ connected";s.style.color="#3a8050";}
-  }catch(e){s.textContent="⚠ network error";s.style.color="#c06040";}
+  }catch(e){s.textContent="⚠ error";s.style.color="#c06040";}
 }
-
-// OpenAI key
 function initOaiBanner(){
   const s=document.getElementById("oai-key-status");
   if(openaiKey){document.getElementById("oai-key-input").value=openaiKey;validateOaiKey(openaiKey,s);}
   else{s.textContent="no key";s.style.color="#c06040";}
 }
 function saveOaiKey(){
-  const val=document.getElementById("oai-key-input").value.trim();
-  const s=document.getElementById("oai-key-status");
+  const val=document.getElementById("oai-key-input").value.trim();const s=document.getElementById("oai-key-status");
   if(!val){s.textContent="⚠ empty";s.style.color="#c06040";return;}
   openaiKey=val;localStorage.setItem("darsana_oai_key",val);
-  document.getElementById("oai-key-input").blur();
-  validateOaiKey(val,s);
+  document.getElementById("oai-key-input").blur();validateOaiKey(val,s);
 }
 function validateOaiKey(val,s){
-  // OpenAI keys start with sk- (classic) or sk-proj- (project keys)
-  if(val.startsWith("sk-")){
-    s.textContent="✓ neural voice ready";s.style.color="#3a8050";
-  }else{
-    s.textContent="⚠ should start with sk-";s.style.color="#c06040";
-  }
+  if(val.startsWith("sk-")){s.textContent="✓ neural voice ready";s.style.color="#3a8050";}
+  else{s.textContent="⚠ must start with sk-";s.style.color="#c06040";}
 }
-async function testOaiKey(){} // no longer used — validation is format-based
-
-// Voice settings
 function setTtsVoice(v){
   ttsVoice=v;localStorage.setItem("darsana_voice",v);
   document.querySelectorAll(".voice-btn").forEach(b=>{
     const a=b.dataset.voice===v;
-    b.style.background=a?"#c8902a":"#fff8ee";
-    b.style.color=a?"#fff":"#a08060";
-    b.style.borderColor=a?"#c8902a":"rgba(180,130,60,0.25)";
-    b.style.fontWeight=a?"600":"400";
+    b.style.background=a?"#c8902a":"#fff8ee";b.style.color=a?"#fff":"#a08060";
+    b.style.borderColor=a?"#c8902a":"rgba(180,130,60,0.25)";b.style.fontWeight=a?"600":"400";
   });
 }
 function setTtsSpeed(val){
@@ -428,34 +414,30 @@ function setTtsSpeed(val){
   document.getElementById("speed-label").textContent=ttsSpeed.toFixed(2)+"×";
 }
 
-// Sanskrit pronunciation map
+// Sanskrit map
 const SANSKRIT_MAP=[
   [/\bPratyabhijñāhṛdayam\b/g,"Prut-yub-hidg-nyaa-hri-duh-yum"],
-  [/\bpratyabhijñā\b/gi,"prut-yub-hidg-nyaa"],
-  [/\bśaktipāta\b/gi,"shuk-tee-paa-tuh"],[/\bsvātantrya\b/gi,"svaa-tun-tryuh"],
-  [/\bvimarśa\b/gi,"vi-mar-shuh"],[/\bspanda\b/gi,"spun-duh"],[/\bSpanda\b/g,"Spun-duh"],
+  [/\bpratyabhijñā\b/gi,"prut-yub-hidg-nyaa"],[/\bśaktipāta\b/gi,"shuk-tee-paa-tuh"],
+  [/\bsvātantrya\b/gi,"svaa-tun-tryuh"],[/\bvimarśa\b/gi,"vi-mar-shuh"],
+  [/\bspanda\b/gi,"spun-duh"],[/\bSpanda\b/g,"Spun-duh"],
   [/\bsushumna\b/gi,"su-shoom-nuh"],[/\bsuṣumnā\b/gi,"su-shoom-naa"],
   [/\bkumbhaka\b/gi,"koom-buh-kuh"],[/\bkaivalya\b/gi,"kai-vul-yuh"],
   [/\bcitta\b/gi,"chit-tuh"],[/\bvṛtti\b/gi,"vrit-tee"],[/\bviveka\b/gi,"vi-vay-kuh"],
   [/\bsamādhi\b/gi,"suh-maa-dhee"],[/\bsamyama\b/gi,"sum-yuh-muh"],
   [/\bpratyāhāra\b/gi,"prut-yaa-haa-ruh"],[/\bpratyahara\b/gi,"prut-yuh-haa-ruh"],
-  [/\bdharaṇā\b/gi,"dhuh-ruh-naa"],[/\bdharana\b/gi,"dhuh-ruh-naa"],
-  [/\bdhyāna\b/gi,"dhyaa-nuh"],[/\bdhyana\b/gi,"dhyaa-nuh"],
+  [/\bdharaṇā\b/gi,"dhuh-ruh-naa"],[/\bdhyāna\b/gi,"dhyaa-nuh"],
   [/\bāsana\b/gi,"aa-suh-nuh"],[/\basana\b/gi,"aa-suh-nuh"],
   [/\bprāṇa\b/gi,"praa-nuh"],[/\bprana\b/gi,"praa-nuh"],
   [/\bkleśa\b/gi,"klay-shuh"],[/\bavidyā\b/gi,"uh-vid-yaa"],
-  [/\basmitā\b/gi,"us-mi-taa"],[/\bvairāgya\b/gi,"vai-raag-yuh"],
-  [/\babhyāsa\b/gi,"ub-hyaa-suh"],[/\babhyasa\b/gi,"ub-hyaa-suh"],
+  [/\bvairāgya\b/gi,"vai-raag-yuh"],[/\babhyāsa\b/gi,"ub-hyaa-suh"],
   [/\bIśvara\b/gi,"Eesh-vuh-ruh"],[/\bIshvara\b/gi,"Eesh-vuh-ruh"],
-  [/\bsaṃskāra\b/gi,"sum-skaa-ruh"],[/\bsamskara\b/gi,"sum-skaa-ruh"],
-  [/\btapas\b/gi,"tuh-pus"],[/\bseva\b/gi,"say-vuh"],
-  [/\bhṛdaya\b/gi,"hri-duh-yuh"],[/\bhrdaya\b/gi,"hri-duh-yuh"],
-  [/\bśiva\b/gi,"shi-vuh"],[/\bśakti\b/gi,"shuk-tee"],[/\bShakti\b/g,"Shuk-tee"],
-  [/\bdīkṣā\b/gi,"deek-shaa"],[/\bdiksha\b/gi,"deek-shaa"],
-  [/\bmokṣa\b/gi,"mok-shuh"],[/\bmoksha\b/gi,"mok-shuh"],
+  [/\bsaṃskāra\b/gi,"sum-skaa-ruh"],[/\btapas\b/gi,"tuh-pus"],
+  [/\bseva\b/gi,"say-vuh"],[/\bhṛdaya\b/gi,"hri-duh-yuh"],
+  [/\bśiva\b/gi,"shi-vuh"],[/\bśakti\b/gi,"shuk-tee"],
+  [/\bdīkṣā\b/gi,"deek-shaa"],[/\bmokṣa\b/gi,"mok-shuh"],
   [/\btantra\b/gi,"tun-truh"],[/\bmantra\b/gi,"mun-truh"],
-  [/ā/g,"aa"],[/Ā/g,"Aa"],[/ī/g,"ee"],[/Ī/g,"Ee"],[/ū/g,"oo"],[/Ū/g,"Oo"],
-  [/ṛ/g,"ri"],[/ś/g,"sh"],[/Ś/g,"Sh"],[/ṣ/g,"sh"],[/ñ/g,"ny"],
+  [/ā/g,"aa"],[/ī/g,"ee"],[/ū/g,"oo"],[/ṛ/g,"ri"],
+  [/ś/g,"sh"],[/Ś/g,"Sh"],[/ṣ/g,"sh"],[/ñ/g,"ny"],
   [/ṃ/g,"m"],[/ṁ/g,"m"],[/ḥ/g,""],[/ṇ/g,"n"],
 ];
 function applySanskrit(t){for(const [p,r] of SANSKRIT_MAP)t=t.replace(p,r);return t;}
@@ -470,14 +452,13 @@ function cleanForSpeech(text){
   return applySanskrit(t);
 }
 
-// Tabs & Footer
+// UI rendering
 function renderTabs(){
   const el=document.getElementById("tabs");
   el.innerHTML='<span class="tab-label">'+(mode==="inquiry"?"Filter":"Lens")+' ›</span>';
   TRADITIONS.forEach(t=>{
     const active=mode==="inquiry"?chatTrad===t.id:medTrad===t.id;
-    const b=document.createElement("button");
-    b.className="tab-btn"+(active?" active":"");
+    const b=document.createElement("button");b.className="tab-btn"+(active?" active":"");
     b.textContent=t.icon+" "+t.label;
     if(active){b.style.background=t.color;b.style.borderColor=t.color;}
     b.onclick=()=>{if(mode==="inquiry"){chatTrad=t.id;renderInquiry();}else{medTrad=t.id;renderMed();}renderTabs();};
@@ -489,42 +470,28 @@ function renderFooter(){
     '<div class="foot-item"><div class="foot-dot" style="background:'+t.color+'"></div><span class="foot-label" style="color:'+t.color+'">'+t.full+'</span></div>'
   ).join("");
 }
-
-// Timer
 function setTimer(mins){
   timerMins=mins;const cl=getLM(medLevel);
   document.querySelectorAll(".timer-btn").forEach(b=>{
-    const a=parseInt(b.dataset.mins)===mins;
-    b.classList.toggle("active",a);b.style.background=a?cl.color:"#fff8ee";
-    b.style.borderColor=a?cl.color:"rgba(180,130,60,0.25)";b.style.color=a?"#fff":"#a08060";
+    const a=parseInt(b.dataset.mins)===mins;b.classList.toggle("active",a);
+    b.style.background=a?cl.color:"#fff8ee";b.style.borderColor=a?cl.color:"rgba(180,130,60,0.25)";b.style.color=a?"#fff":"#a08060";
   });
 }
-
-// Inquiry render
 function renderInquiry(){
   const body=document.getElementById("inquiry-body");
   if(messages.length>0){renderMessages();return;}
-  const ct=getTM(chatTrad),cc=ct.color;
-  const[q,qs]=QUOTES[chatTrad];
+  const ct=getTM(chatTrad),cc=ct.color;const[q,qs]=QUOTES[chatTrad];
   let html="";
-  if(chatTrad!=="all"){
-    html+='<div class="filter-banner fade-in" style="background:'+cc+'15;border:1px solid '+cc+'40"><div class="filter-dot" style="background:'+cc+'"></div><span style="color:'+cc+';font-size:11px;flex:1;font-weight:600">Responding through '+ct.full+' only</span><button class="filter-x" onclick="chatTrad=\'all\';renderInquiry();renderTabs()">✕</button></div>';
-  }
-  html+='<div class="quote-box fade-in" style="background:'+cc+'0d;border:1px solid '+cc+'30"><div class="quote-star" style="color:'+cc+'">✦</div><div class="quote-text" style="color:'+cc+'CC">"'+q+'"</div><div class="quote-src">'+qs+'</div></div><div class="section-label" style="margin-top:4px">Begin your inquiry</div>';
-  STARTERS[chatTrad].forEach(s=>{
-    html+='<button class="starter-btn fade-in" onclick="document.getElementById(\'msg-input\').value=this.dataset.s;updateSendBtn()" data-s="'+s.replace(/"/g,"&quot;")+'"><span style="color:'+cc+';opacity:0.6;margin-right:8px">'+ct.icon+'</span>'+s+'</button>';
-  });
+  if(chatTrad!=="all"){html+='<div class="filter-banner fade-in" style="background:'+cc+'15;border:1px solid '+cc+'40"><div class="filter-dot" style="background:'+cc+'"></div><span style="color:'+cc+';font-size:11px;flex:1;font-weight:600">Responding through '+ct.full+' only</span><button class="filter-x" onclick="chatTrad=\'all\';renderInquiry();renderTabs()">✕</button></div>';}
+  html+='<div class="quote-box fade-in" style="background:'+cc+'0d;border:1px solid '+cc+'30"><div class="quote-star" style="color:'+cc+'">✦</div><div class="quote-text" style="color:'+cc+'CC">&ldquo;'+q+'&rdquo;</div><div class="quote-src">'+qs+'</div></div><div class="section-label" style="margin-top:4px">Begin your inquiry</div>';
+  STARTERS[chatTrad].forEach(s=>{html+='<button class="starter-btn fade-in" onclick="document.getElementById(\'msg-input\').value=this.dataset.s;updateSendBtn()" data-s="'+s.replace(/"/g,"&quot;")+'"><span style="color:'+cc+';opacity:0.6;margin-right:8px">'+ct.icon+'</span>'+s+'</button>';});
   body.innerHTML=html;updateSendBtn();
 }
-
 function renderMessages(){
   const body=document.getElementById("inquiry-body");let html="";
   messages.forEach((m,i)=>{
-    if(m.role==="user"){
-      html+='<div class="msg-row user fade-in"><div class="msg-bubble user">'+escHtml(m.content)+'</div></div>';
-    }else{
-      html+='<div class="msg-row fade-in"><div class="msg-avatar"><div class="msg-avatar-inner">ॐ</div></div><div class="msg-bubble-wrap"><div class="msg-bubble assistant">'+escHtml(m.content)+'</div><button class="speak-btn" id="speak-'+i+'" onclick="speakMsg('+i+')">🔊 Listen</button></div></div>';
-    }
+    if(m.role==="user"){html+='<div class="msg-row user fade-in"><div class="msg-bubble user">'+escHtml(m.content)+'</div></div>';}
+    else{html+='<div class="msg-row fade-in"><div class="msg-avatar"><div class="msg-avatar-inner">ॐ</div></div><div class="msg-bubble-wrap"><div class="msg-bubble assistant">'+escHtml(m.content)+'</div><button class="speak-btn" id="speak-'+i+'" onclick="speakMsg('+i+')">🔊 Listen</button></div></div>';}
   });
   body.innerHTML=html;body.scrollTop=body.scrollHeight;updateSendBtn();
 }
@@ -536,11 +503,9 @@ function addTyping(){
 }
 function removeTyping(){const e=document.getElementById("typing-ind");if(e)e.remove();}
 function updateSendBtn(){
-  const val=document.getElementById("msg-input").value.trim();
-  const btn=document.getElementById("send-btn");const cc=getTM(chatTrad).color;
-  btn.style.background=val?cc:"#c0b090";btn.style.cursor=val?"pointer":"not-allowed";
+  const val=document.getElementById("msg-input").value.trim();const btn=document.getElementById("send-btn");
+  const cc=getTM(chatTrad).color;btn.style.background=val?cc:"#c0b090";btn.style.cursor=val?"pointer":"not-allowed";
 }
-
 async function sendMsg(){
   const inp=document.getElementById("msg-input");const text=inp.value.trim();
   if(!text||!checkKey())return;
@@ -551,23 +516,19 @@ async function sendMsg(){
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1400,system:chatSystem(chatTrad),messages})});
     const d=await r.json();removeTyping();
     messages.push({role:"assistant",content:d.content?.[0]?.text||"Unable to respond."});renderMessages();
-  }catch(e){removeTyping();messages.push({role:"assistant",content:"Something went wrong. Please try again."});renderMessages();}
+  }catch(e){removeTyping();messages.push({role:"assistant",content:"Something went wrong."});renderMessages();}
 }
 
-// Meditation render
+// Meditation UI
 function renderMed(){
   const cl=getLM(medLevel),mt=getTM(medTrad);
   document.getElementById("level-grid").innerHTML=LEVELS.map(lv=>{
     const a=medLevel===lv.id;
-    return '<button class="level-btn" onclick="medLevel=\''+lv.id+'\';renderMed()" style="'+(a?'border-color:'+lv.color+';background:'+lv.color+'15;box-shadow:0 2px 10px '+lv.color+'25':'')+'">'
-      +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span class="level-icon" style="color:'+lv.color+'">'+lv.icon+'</span><span class="level-name" style="color:'+(a?lv.color:'#8a6848')+'">'+lv.label+'</span></div>'
-      +'<div class="level-desc">'+lv.desc+'</div></button>';
+    return '<button class="level-btn" onclick="medLevel=\''+ lv.id+'\';renderMed()" style="'+(a?'border-color:'+lv.color+';background:'+lv.color+'15;box-shadow:0 2px 10px '+lv.color+'25':'')+'"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span class="level-icon" style="color:'+lv.color+'">'+lv.icon+'</span><span class="level-name" style="color:'+(a?lv.color:'#8a6848')+'">'+lv.label+'</span></div><div class="level-desc">'+lv.desc+'</div></button>';
   }).join("");
   const lb=document.getElementById("lens-banner");
-  if(medTrad!=="all"){
-    lb.setAttribute("style","display:flex;align-items:center;gap:7px;padding:7px 13px;border-radius:10px;font-size:11px;margin-top:10px;background:"+mt.color+"12;border:1px solid "+mt.color+"35;color:"+mt.color+";font-weight:600");
-    lb.innerHTML='<span>'+mt.icon+'</span><span>Guided through '+mt.full+'</span>';
-  }else lb.style.display="none";
+  if(medTrad!=="all"){lb.setAttribute("style","display:flex;align-items:center;gap:7px;padding:7px 13px;border-radius:10px;font-size:11px;margin-top:10px;background:"+mt.color+"12;border:1px solid "+mt.color+"35;color:"+mt.color+";font-weight:600");lb.innerHTML='<span>'+mt.icon+'</span><span>Guided through '+mt.full+'</span>';}
+  else lb.style.display="none";
   const gb=document.getElementById("gen-btn");
   gb.style.cssText="background:linear-gradient(135deg,"+cl.color+"18,"+cl.color+"08);border:1px solid "+cl.color+"45;color:"+cl.color+";padding:12px;border-radius:13px;font-size:13px;font-family:Palatino,serif;font-style:italic;letter-spacing:0.05em;display:flex;align-items:center;justify-content:center;gap:9px;transition:all 0.25s;cursor:pointer;margin-top:12px;width:100%;box-shadow:0 2px 8px "+cl.color+"18";
   document.getElementById("gen-icon").textContent=cl.icon;
@@ -583,20 +544,19 @@ function renderMed(){
 }
 
 async function genMeditation(){
-  if(!checkKey())return;
-  stopSpeech();
+  if(!checkKey())return;stopSpeech();
   const btn=document.getElementById("gen-btn");const cl=getLM(medLevel);
   btn.disabled=true;document.getElementById("med-result").style.display="none";
   btn.innerHTML='<span style="display:flex;gap:6px;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:'+cl.color+';animation:bounce 1.3s ease infinite;display:inline-block"></span><span style="width:6px;height:6px;border-radius:50%;background:'+cl.color+';animation:bounce 1.3s ease infinite;animation-delay:0.22s;display:inline-block"></span><span style="width:6px;height:6px;border-radius:50%;background:'+cl.color+';animation:bounce 1.3s ease infinite;animation-delay:0.44s;display:inline-block"></span><span style="color:'+cl.color+'">Preparing guidance…</span></span>';
   const tokens=timerMins===0?600:timerMins<=5?700:timerMins<=10?1000:1400;
-  const fetchWithTimeout = () => Promise.race([
-    fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHeaders(),
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:tokens,system:medSystem(medLevel,medTrad,timerMins),
-        messages:[{role:"user",content:"Guided meditation for a "+medLevel+" practitioner. Tradition: "+(medTrad==="all"?"all five traditions":getTM(medTrad).full)+"."+(timerMins>0?" Target: "+timerMins+" minutes.":"")}]})}),
-    new Promise((_,rej)=>setTimeout(()=>rej(new Error("Timed out — try again")),50000))
-  ]);
   try{
-    const r=await fetchWithTimeout();
+    const r=await Promise.race([
+      fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHeaders(),
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:tokens,
+          system:medSystem(medLevel,medTrad,timerMins),
+          messages:[{role:"user",content:"Guided meditation for a "+medLevel+" practitioner. Tradition: "+(medTrad==="all"?"all five traditions":getTM(medTrad).full)+"."+(timerMins>0?" Target: "+timerMins+" minutes.":"")}]})}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error("Timed out")),50000))
+    ]);
     const d=await r.json();
     if(d.error)throw new Error(d.error.message);
     medText=d.content?.[0]?.text||"";if(!medText)throw new Error("Empty response");
@@ -604,22 +564,20 @@ async function genMeditation(){
     document.getElementById("med-text-preview").textContent=medText.replace(/\.{3,}/g," · · · ");
     document.getElementById("med-result").style.display="block";
   }catch(e){
-    const msg=e.message?e.message.slice(0,60):"Could not generate. Try again.";
-    document.getElementById("med-ready-label").textContent=msg;
+    document.getElementById("med-ready-label").textContent=e.message?e.message.slice(0,60):"Could not generate. Try again.";
     document.getElementById("med-ready-label").style.color="#c04040";
     document.getElementById("med-result").style.display="block";
   }finally{btn.disabled=false;renderMed();}
 }
 
-// ─── TAMBURA DRONE ────────────────────────────────────────────
+// ─── DRONE ─────────────────────────────────────────────────────
 let droneCtx=null,droneNodes=[],droneGain=null,droneActive=false;
 const DRONE_TYPES={
   tambura:{freq:65.4,harmonics:[1,2,3,4,5,6,7,8],gains:[0.5,0.35,0.22,0.15,0.10,0.07,0.04,0.02],detune:[0,2,-1,3,-2,1,-3,2]},
-  bowl:   {freq:432,harmonics:[1,2.76,5.1],gains:[0.45,0.25,0.12],detune:[0,1,-1]},
-  nada:   {freq:82.4,harmonics:[1,2,3,4,5],gains:[0.4,0.28,0.18,0.10,0.05],detune:[0,-2,1,-1,2]},
+  bowl:{freq:432,harmonics:[1,2.76,5.1],gains:[0.45,0.25,0.12],detune:[0,1,-1]},
+  nada:{freq:82.4,harmonics:[1,2,3,4,5],gains:[0.4,0.28,0.18,0.10,0.05],detune:[0,-2,1,-1,2]},
 };
 let droneType="tambura",droneVol=0.18;
-
 function startDrone(){
   if(droneActive)return;
   try{
@@ -636,16 +594,14 @@ function startDrone(){
     });
     if(droneType==="tambura"){
       const lfo=droneCtx.createOscillator();const lfoG=droneCtx.createGain();
-      lfo.frequency.value=0.4;lfoG.gain.value=0.015;
-      lfo.connect(lfoG);lfoG.connect(droneGain.gain);lfo.start();droneNodes.push({osc:lfo,g:lfoG});
+      lfo.frequency.value=0.4;lfoG.gain.value=0.015;lfo.connect(lfoG);lfoG.connect(droneGain.gain);lfo.start();droneNodes.push({osc:lfo,g:lfoG});
     }
     droneActive=true;updateDroneBtn();
   }catch(e){console.warn("Drone:",e);}
 }
 function stopDrone(){
   if(!droneActive||!droneCtx)return;
-  try{
-    droneGain.gain.linearRampToValueAtTime(0,droneCtx.currentTime+2);
+  try{droneGain.gain.linearRampToValueAtTime(0,droneCtx.currentTime+2);
     setTimeout(()=>{droneNodes.forEach(n=>{try{n.osc.stop();}catch(e){}});droneCtx.close();droneActive=false;droneNodes=[];updateDroneBtn();},2200);
   }catch(e){droneActive=false;updateDroneBtn();}
 }
@@ -670,67 +626,10 @@ function updateDroneBtn(){
   else{btn.textContent="♪ Start Drone";btn.style.background="#fff8ee";btn.style.color="#a08060";btn.style.borderColor="rgba(180,130,60,0.25)";}
 }
 
-// ─── OPENAI TTS ENGINE ─────────────────────────────────────────
-function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-
-async function ttsChunk(text){
-  if(!openaiKey)return null;
-  const r=await fetch("https://api.openai.com/v1/audio/speech",{
-    method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey},
-    body:JSON.stringify({model:"tts-1-hd",voice:ttsVoice,input:text,speed:ttsSpeed,response_format:"mp3"})
-  });
-  if(!r.ok)throw new Error("OpenAI TTS: "+(await r.text()).slice(0,80));
-  return URL.createObjectURL(await r.blob());
-}
-function browserSpeakText(text){
-  return new Promise(res=>{
-    const u=new SpeechSynthesisUtterance(applySanskrit(text));
-    u.voice=voiceObj;u.rate=getLM(medLevel).rate;u.pitch=0.92;u.volume=0.95;
-    u.onend=u.onerror=res;speechSynthesis.speak(u);
-  });
-}
-// Shared audio context for playback (works inside iframes unlike new Audio())
-let audioCtx=null;
-let currentSource=null;
-
-function getAudioCtx(){
-  if(!audioCtx||audioCtx.state==="closed"){
-    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  }
-  if(audioCtx.state==="suspended") audioCtx.resume();
-  return audioCtx;
-}
-
-async function ttsChunk(text){
-  if(!openaiKey)return null;
-  const r=await fetch("https://api.openai.com/v1/audio/speech",{
-    method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey},
-    body:JSON.stringify({model:"tts-1-hd",voice:ttsVoice,input:text,speed:ttsSpeed,response_format:"mp3"})
-  });
-  if(!r.ok)throw new Error("OpenAI TTS: "+(await r.text()).slice(0,80));
-  return await r.arrayBuffer(); // return raw bytes, not blob URL
-}
-
-function playBuffer(arrayBuffer){
-  return new Promise(async(res,rej)=>{
-    try{
-      const ctx=getAudioCtx();
-      const decoded=await ctx.decodeAudioData(arrayBuffer.slice(0)); // slice to copy
-      const source=ctx.createBufferSource();
-      source.buffer=decoded;
-      source.connect(ctx.destination);
-      currentSource=source;
-      source.onended=()=>{currentSource=null;res();};
-      source.start(0);
-    }catch(e){rej(e);}
-  });
-}
-
-function stopCurrentAudio(){
-  if(currentSource){
-    try{currentSource.stop();}catch(e){}
-    currentSource=null;
-  }
+// ─── TTS ENGINE ─────────────────────────────────────────────────
+function getMedRate(){
+  const rates={beginner:0.82,moderate:0.78,advanced:0.72,awakened:0.64};
+  return rates[medLevel]||0.78;
 }
 function splitChunks(text,max){
   if(text.length<=max)return[text];
@@ -739,19 +638,44 @@ function splitChunks(text,max){
   for(const s of sents){if((cur+s).length>max&&cur){chunks.push(cur.trim());cur=s;}else cur+=s;}
   if(cur.trim())chunks.push(cur.trim());return chunks;
 }
-
-function parseSegs(text){
-  return text.split(/(\.\.{2,})/g).filter(Boolean).map(p=>{
-    if(/^\.{6,}$/.test(p))return{text:null,ms:5500};
-    if(/^\.{3,5}$/.test(p))return{text:null,ms:2200};
-    const t=p.replace(/\s+/g," ").trim();return t?{text:t,ms:700}:null;
-  }).filter(Boolean);
+async function ttsSpeak(text, rate){
+  if(openaiKey){
+    try{
+      const r=await fetch("https://api.openai.com/v1/audio/speech",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+openaiKey},
+        body:JSON.stringify({model:"tts-1-hd",voice:ttsVoice,input:applySanskrit(text),speed:ttsSpeed,response_format:"mp3"})
+      });
+      if(!r.ok)throw new Error("OpenAI "+r.status);
+      const blob=await r.blob();
+      const url=URL.createObjectURL(blob);
+      await new Promise((res,rej)=>{
+        const a=new Audio(url);
+        a.onended=()=>{URL.revokeObjectURL(url);res();};
+        a.onerror=(e)=>{URL.revokeObjectURL(url);rej(e);};
+        a.play().catch(rej);
+      });
+      return;
+    }catch(e){console.warn("OpenAI TTS, using browser fallback:",e.message);}
+  }
+  // Browser fallback
+  await new Promise(res=>{
+    const u=new SpeechSynthesisUtterance(applySanskrit(text));
+    u.voice=voiceObj;u.rate=rate||getMedRate();u.pitch=0.91;u.volume=1.0;
+    u.onend=u.onerror=res;speechSynthesis.speak(u);
+  });
 }
 
+function parseSegs(text){
+  return text.split(/(\.*\.+)/g).filter(Boolean).map(p=>{
+    if(/^\.{6,}$/.test(p))return{text:null,ms:5000};
+    if(/^\.{3,5}$/.test(p))return{text:null,ms:2000};
+    const t=p.replace(/\s+/g," ").trim();return t?{text:t,ms:600}:null;
+  }).filter(Boolean);
+}
 function startBreath(){
   setBreath("in");
-  const cycle=()=>{setBreath("in");breathTimer=setTimeout(()=>{setBreath("out");breathTimer=setTimeout(cycle,5500);},4500);};
-  cycle();
+  const cycle=()=>{setBreath("in");breathTimer=setTimeout(()=>{setBreath("out");breathTimer=setTimeout(cycle,5500);},4500);};cycle();
 }
 function setBreath(phase){
   const bc=document.getElementById("breath-circle"),bl=document.getElementById("breath-label");
@@ -774,70 +698,43 @@ function showBreathUI(show){
   document.getElementById("breath-section").style.display=show?"flex":"none";
   document.getElementById("med-config").style.display=show?"none":"block";
 }
-
 function stopSpeech(){
-  ttsAborted=true;
-  stopCurrentAudio();
-  speechSynthesis.cancel();
+  ttsAborted=true;speechSynthesis.cancel();
   isSpeaking=false;isPaused=false;
   setSpeaking(false);stopBreath();stopCountdown();showBreathUI(false);stopDrone();
 }
 function setSpeaking(val){
   isSpeaking=val;showBreathUI(val);const b=document.getElementById("pause-btn");if(b)b.textContent="⏸ Pause";
 }
-
 async function runMeditation(segs){
   for(const seg of segs){
     if(ttsAborted)break;
     while(isPaused&&!ttsAborted)await sleep(200);
     if(ttsAborted)break;
     if(!seg.text){await sleep(seg.ms);continue;}
-    try{
-      if(openaiKey){
-        const buf=await ttsChunk(seg.text);
-        if(ttsAborted)break;
-        while(isPaused&&!ttsAborted)await sleep(200);
-        if(ttsAborted)break;
-        await playBuffer(buf);
-      }else{await browserSpeakText(seg.text);}
-      if(!ttsAborted)await sleep(seg.ms);
-    }catch(e){if(!ttsAborted)console.warn("TTS:",e);}
+    try{await ttsSpeak(seg.text,getMedRate());if(!ttsAborted)await sleep(seg.ms);}
+    catch(e){if(!ttsAborted)console.warn("TTS:",e);}
   }
   if(!ttsAborted){isSpeaking=false;setSpeaking(false);stopBreath();stopCountdown();stopDrone();}
 }
-
 async function speakMsg(idx){
   const msg=messages[idx];if(!msg||msg.role!=="assistant")return;
   const btn=document.getElementById("speak-"+idx);
   if(currentSpeakId===idx){
-    ttsAborted=true;stopCurrentAudio();speechSynthesis.cancel();
-    currentSpeakId=null;if(btn){btn.textContent="🔊 Listen";btn.classList.remove("speaking");}return;
+    ttsAborted=true;speechSynthesis.cancel();currentSpeakId=null;
+    if(btn){btn.textContent="🔊 Listen";btn.classList.remove("speaking");}return;
   }
-  ttsAborted=true;stopCurrentAudio();speechSynthesis.cancel();await sleep(80);
-  if(currentSpeakId!==null){
-    const old=document.getElementById("speak-"+currentSpeakId);
-    if(old){old.textContent="🔊 Listen";old.classList.remove("speaking");}
-  }
+  ttsAborted=true;speechSynthesis.cancel();await sleep(80);
+  if(currentSpeakId!==null){const old=document.getElementById("speak-"+currentSpeakId);if(old){old.textContent="🔊 Listen";old.classList.remove("speaking");}}
   currentSpeakId=idx;ttsAborted=false;
   if(btn){btn.textContent="◼ Stop";btn.classList.add("speaking");}
-  const cleaned=cleanForSpeech(msg.content);
   try{
-    if(openaiKey){
-      for(const chunk of splitChunks(cleaned,900)){
-        if(ttsAborted)break;
-        const buf=await ttsChunk(chunk);
-        if(ttsAborted)break;
-        await playBuffer(buf);
-      }
-    }else{
-      const u=new SpeechSynthesisUtterance(cleaned);
-      u.voice=voiceObj;u.rate=0.9;u.pitch=0.95;u.volume=1;
-      await new Promise(r=>{u.onend=u.onerror=r;speechSynthesis.speak(u);});
+    for(const chunk of splitChunks(cleanForSpeech(msg.content),900)){
+      if(ttsAborted)break;await ttsSpeak(chunk,0.88);
     }
-  }catch(e){console.warn("Listen TTS:",e);}
+  }catch(e){console.warn("speakMsg:",e);}
   if(!ttsAborted){currentSpeakId=null;if(btn){btn.textContent="🔊 Listen";btn.classList.remove("speaking");}}
 }
-
 function beginSpeech(){
   if(!medText)return;
   stopSpeech();const segs=parseSegs(medText);
@@ -845,22 +742,16 @@ function beginSpeech(){
   setSpeaking(true);startBreath();startCountdown();startDrone();
   sleep(2000).then(()=>{if(!ttsAborted)runMeditation(segs);});
 }
-
 function togglePause(){
   if(!isSpeaking)return;const btn=document.getElementById("pause-btn");
   if(!isPaused){
-    isPaused=true;btn.textContent="▶ Resume";stopBreath();stopCountdown();
-    if(currentSource){try{currentSource.stop();}catch(e){}}
-    else speechSynthesis.pause();
+    isPaused=true;btn.textContent="▶ Resume";stopBreath();stopCountdown();speechSynthesis.pause();
     if(droneGain&&droneCtx)droneGain.gain.linearRampToValueAtTime(droneVol*0.35,droneCtx.currentTime+1.2);
   }else{
-    isPaused=false;btn.textContent="⏸ Pause";startBreath();startCountdown();
-    // runMeditation loop handles resume via isPaused check
-    speechSynthesis.resume();
+    isPaused=false;btn.textContent="⏸ Pause";startBreath();startCountdown();speechSynthesis.resume();
     if(droneGain&&droneCtx)droneGain.gain.linearRampToValueAtTime(droneVol,droneCtx.currentTime+1.2);
   }
 }
-
 function setMode(m){
   mode=m;
   document.querySelectorAll(".mode-btn").forEach(b=>b.classList.toggle("active",b.dataset.mode===m));
